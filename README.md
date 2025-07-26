@@ -8,7 +8,6 @@ This is a Python-based tool designed to scrape content from Instagram hashtags a
 
 
 ## Platforms Scraped
-
 ### Instagram
 - Uses Playwright for browser automation
 - Scrapes hashtag search results
