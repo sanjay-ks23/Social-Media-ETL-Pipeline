@@ -171,8 +171,8 @@ The CSV file contains all metadata from both platforms, with platform-specific f
 
 ## License
 
-MIT License
 
 ## Disclaimer
 
 This tool is intended for educational purposes only. Users are responsible for ensuring their use of this tool complies with the terms of service of the platforms being scraped.
+
