@@ -169,7 +169,8 @@ The CSV file contains all metadata from both platforms, with platform-specific f
 - When the script completes, you may see asyncio pipe errors on Windows systems. These are harmless and don't affect the scraped data.
 - For large scrapes, be mindful of API rate limits for Youtube.
 
-## License
+
+
 
 
 
