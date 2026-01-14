@@ -1,8 +1,18 @@
-
+# Core dependencies
 pandas
 requests
 tqdm
 asyncio
 playwright
-google-api-python-client 
-python-dateutil 
+google-api-python-client
+python-dateutil
+
+# Production utilities
+aiohttp>=3.9.0
+tenacity>=8.2.0
+
+# Interactive CLI
+rich>=13.0.0
+
+# Database (microsecond queries)
+duckdb>=0.9.0

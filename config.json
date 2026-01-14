@@ -1,9 +1,22 @@
 {
-    "youtube_api_key": "YOUTUBE_API_KEY",
+    "youtube_api_key": "YOUR_YOUTUBE_API_KEY",
     "instagram": {
-        "username": "INSTAGRAM_USERNAME",
-        "password": "INSTAGRAM_PASSWORD"
+        "username": "YOUR_INSTAGRAM_USERNAME",
+        "password": "YOUR_INSTAGRAM_PASSWORD"
+    },
+    "twitter": {
+        "username": "YOUR_TWITTER_USERNAME",
+        "password": "YOUR_TWITTER_PASSWORD"
+    },
+    "reddit": {
+        "user_agent": "SocialMediaETL/1.0 (research project)"
     },
     "thumbnail_directory": "thumbnails",
-    "output_file": "metadata.csv"
-} 
+    "output_file": "metadata.csv",
+    "rate_limits": {
+        "twitter": 30,
+        "reddit": 30,
+        "youtube": 100,
+        "instagram": 30
+    }
+}

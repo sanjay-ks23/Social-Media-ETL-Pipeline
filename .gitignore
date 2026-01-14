@@ -172,3 +172,23 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# ================================
+# Project-specific
+# ================================
+
+# Database files
+*.duckdb
+*.duckdb.wal
+
+# Scraped data (regenerated)
+metadata.csv
+thumbnails/
+*.parquet
+
+# Config with credentials
+config.json
+
+# Exports
+export_*.csv
+export_*.parquet
