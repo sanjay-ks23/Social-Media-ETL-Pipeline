@@ -3,6 +3,8 @@
 A production-grade Python framework for extracting, transforming, and loading social media data from multiple platforms. Built for researchers, data scientists, and developers who need structured datasets for sentiment analysis, behavioral modeling, and NLP applications.
 
 ---
+![Interactive CLI Preview](assets/cli_dashboard.png)
+
 
 ## Table of Contents
 
@@ -547,6 +549,4 @@ This tool is intended for research and educational purposes. Users are responsib
 
 ---
 
-### Dashboard Preview
 
-![Interactive CLI Preview](assets/cli_dashboard.png)
