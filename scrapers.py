@@ -908,7 +908,7 @@ class YouTubeScraper(BaseScraper):
     @classmethod
     def _execute_scrape(cls, query, limit):
         """
-        YouTube-specific implementation of the scrape method
+        YouTube-specific implementation of the scrape method.
         
         Args:
             query: Search terms to find videos
@@ -922,4 +922,680 @@ class YouTubeScraper(BaseScraper):
         
         # Search for videos and collect data
         videos_data = scraper.search_videos(query, limit)
-        return videos_data 
+        return videos_data
+
+
+#------------ REDDIT SCRAPER USING FREE .JSON ENDPOINTS ------------#
+
+class RedditScraper(BaseScraper):
+    """
+    Reddit scraper using free .json endpoints (no API key required).
+    
+    Appends .json to old.reddit.com URLs to get structured data.
+    No authentication needed for public posts.
+    
+    Endpoints used:
+        - https://old.reddit.com/r/{subreddit}/{sort}.json
+        - https://old.reddit.com/search.json?q={query}
+    """
+    
+    def __init__(self):
+        config = load_config()
+        
+        self.base_url = "https://old.reddit.com"
+        self.user_agent = config.get('reddit', {}).get(
+            'user_agent', 
+            'SocialMediaETL/1.0 (research project)'
+        )
+        self.headers = {
+            'User-Agent': self.user_agent
+        }
+        
+        # Use thumbnail directory from config
+        self.thumbnail_dir = config.get('thumbnail_directory', 'thumbnails')
+        ensure_dir_exists(self.thumbnail_dir)
+        
+        # Rate limiting - Reddit allows ~30 requests/minute without auth
+        self.request_delay = 2.0  # 2 seconds between requests
+        self.last_request_time = 0
+        
+        self.posts_data = []
+        logger.info(f"RedditScraper initialized with User-Agent: {self.user_agent}")
+    
+    def _rate_limit(self):
+        """Ensure we don't exceed rate limits."""
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.request_delay:
+            time.sleep(self.request_delay - elapsed)
+        self.last_request_time = time.time()
+    
+    def _make_request(self, url, params=None):
+        """Make a rate-limited request to Reddit."""
+        self._rate_limit()
+        
+        try:
+            response = requests.get(url, headers=self.headers, params=params, timeout=30)
+            
+            if response.status_code == 429:
+                logger.warning("Rate limited by Reddit, waiting 60 seconds...")
+                time.sleep(60)
+                return self._make_request(url, params)
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Request failed: {e}")
+            return None
+    
+    def search_subreddit(self, subreddit, sort='hot', limit=50):
+        """
+        Scrape posts from a specific subreddit.
+        
+        Args:
+            subreddit: Subreddit name (without r/)
+            sort: Sort order - 'hot', 'new', 'top', 'rising'
+            limit: Maximum posts to retrieve
+        """
+        logger.info(f"Scraping r/{subreddit} ({sort}) - limit: {limit}")
+        
+        posts_data = []
+        after = None
+        posts_per_page = min(100, limit)  # Reddit max is 100 per request
+        
+        with tqdm(total=limit, desc=f"Scraping r/{subreddit}") as pbar:
+            while len(posts_data) < limit:
+                # Build URL
+                url = f"{self.base_url}/r/{subreddit}/{sort}.json"
+                params = {
+                    'limit': posts_per_page,
+                    'raw_json': 1
+                }
+                if after:
+                    params['after'] = after
+                
+                # Make request
+                data = self._make_request(url, params)
+                if not data or 'data' not in data:
+                    logger.warning("No data received, stopping")
+                    break
+                
+                # Process posts
+                children = data['data'].get('children', [])
+                if not children:
+                    logger.info("No more posts available")
+                    break
+                
+                for child in children:
+                    if len(posts_data) >= limit:
+                        break
+                    
+                    post = child.get('data', {})
+                    post_data = self._process_post(post)
+                    if post_data:
+                        posts_data.append(post_data)
+                        
+                        # Download thumbnail
+                        if post_data.get('image_url'):
+                            download_thumbnail(
+                                post_data['image_url'],
+                                post_data['post_id'],
+                                self.thumbnail_dir
+                            )
+                        
+                        pbar.update(1)
+                
+                # Get next page token
+                after = data['data'].get('after')
+                if not after:
+                    logger.info("Reached end of posts")
+                    break
+        
+        self.posts_data = posts_data
+        logger.info(f"Successfully scraped {len(posts_data)} posts from r/{subreddit}")
+        return posts_data
+    
+    def search_posts(self, query, sort='relevance', limit=50):
+        """
+        Search Reddit for posts matching a query.
+        
+        Args:
+            query: Search query string
+            sort: Sort order - 'relevance', 'hot', 'top', 'new', 'comments'
+            limit: Maximum posts to retrieve
+        """
+        logger.info(f"Searching Reddit for '{query}' ({sort}) - limit: {limit}")
+        
+        posts_data = []
+        after = None
+        posts_per_page = min(100, limit)
+        
+        with tqdm(total=limit, desc=f"Searching '{query}'") as pbar:
+            while len(posts_data) < limit:
+                # Build URL
+                url = f"{self.base_url}/search.json"
+                params = {
+                    'q': query,
+                    'sort': sort,
+                    'limit': posts_per_page,
+                    'raw_json': 1,
+                    'type': 'link'  # Only posts, not comments
+                }
+                if after:
+                    params['after'] = after
+                
+                # Make request
+                data = self._make_request(url, params)
+                if not data or 'data' not in data:
+                    logger.warning("No data received, stopping")
+                    break
+                
+                # Process posts
+                children = data['data'].get('children', [])
+                if not children:
+                    logger.info("No more posts available")
+                    break
+                
+                for child in children:
+                    if len(posts_data) >= limit:
+                        break
+                    
+                    post = child.get('data', {})
+                    post_data = self._process_post(post)
+                    if post_data:
+                        posts_data.append(post_data)
+                        
+                        # Download thumbnail
+                        if post_data.get('image_url'):
+                            download_thumbnail(
+                                post_data['image_url'],
+                                post_data['post_id'],
+                                self.thumbnail_dir
+                            )
+                        
+                        pbar.update(1)
+                
+                # Get next page token
+                after = data['data'].get('after')
+                if not after:
+                    logger.info("Reached end of search results")
+                    break
+        
+        self.posts_data = posts_data
+        logger.info(f"Successfully scraped {len(posts_data)} posts from search")
+        return posts_data
+    
+    def _process_post(self, post):
+        """Process a single Reddit post into our standard format."""
+        try:
+            post_id = post.get('id', '')
+            if not post_id:
+                return None
+            
+            # Get title and selftext
+            title = self._clean_text(post.get('title', ''))
+            selftext = self._clean_text(post.get('selftext', ''))
+            post_text = f"{title}\n\n{selftext}".strip() if selftext else title
+            
+            # Get thumbnail/image URL
+            image_url = ''
+            thumbnail = post.get('thumbnail', '')
+            if thumbnail and thumbnail.startswith('http'):
+                image_url = thumbnail
+            
+            # Try to get higher quality image
+            preview = post.get('preview', {})
+            if preview and 'images' in preview:
+                images = preview['images']
+                if images:
+                    source = images[0].get('source', {})
+                    if source.get('url'):
+                        # Reddit encodes URLs, decode them
+                        image_url = source['url'].replace('&amp;', '&')
+            
+            # Get flair as hashtag/topic
+            flair = post.get('link_flair_text', '') or ''
+            
+            # Convert timestamp
+            created_utc = post.get('created_utc', 0)
+            timestamp = datetime.fromtimestamp(created_utc).isoformat() if created_utc else ''
+            
+            return {
+                'post_id': post_id,
+                'platform': 'reddit',
+                'post_text': post_text,
+                'hashtags': flair,  # Using flair as topic/tag
+                'timestamp': timestamp,
+                'image_url': image_url,
+                'likes': post.get('score', 0),
+                'comments': post.get('num_comments', 0),
+                'author': post.get('author', '[deleted]'),
+                'subreddit': post.get('subreddit', ''),
+                'url': f"https://reddit.com{post.get('permalink', '')}",
+                'upvote_ratio': post.get('upvote_ratio', 0),
+                'scraped_at': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.warning(f"Error processing Reddit post: {e}")
+            return None
+    
+    def _clean_text(self, text):
+        """Clean Reddit text content."""
+        if not text:
+            return ""
+        
+        # Replace common Reddit markdown
+        text = text.replace('&amp;', '&')
+        text = text.replace('&lt;', '<')
+        text = text.replace('&gt;', '>')
+        text = text.replace('&#x200B;', '')  # Zero-width space
+        
+        # Replace special characters
+        text = text.replace('\u2018', "'")
+        text = text.replace('\u2019', "'")
+        text = text.replace('\u201c', '"')
+        text = text.replace('\u201d', '"')
+        text = text.replace('\u2013', '-')
+        text = text.replace('\u2014', '--')
+        
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        
+        return text.strip()
+    
+    @classmethod
+    def _execute_scrape(cls, query, limit, subreddit=None, sort='hot'):
+        """
+        Reddit-specific implementation of the scrape method.
+        
+        Args:
+            query: Search query (used if subreddit is None)
+            limit: Maximum posts to retrieve
+            subreddit: Optional specific subreddit to scrape
+            sort: Sort order for results
+        """
+        scraper = cls()
+        
+        if subreddit:
+            return scraper.search_subreddit(subreddit, sort=sort, limit=limit)
+        else:
+            return scraper.search_posts(query, sort='relevance', limit=limit)
+
+
+#------------ TWITTER/X SCRAPER USING PLAYWRIGHT ------------#
+
+class TwitterScraper(BaseScraper):
+    """
+    Twitter/X scraper using Playwright browser automation (no API required).
+    
+    Similar approach to InstagramScraper - uses browser automation to
+    navigate Twitter's JavaScript-heavy interface and extract data.
+    
+    Features:
+        - Search tweets by query or hashtag
+        - Handle infinite scroll
+        - Extract tweet metadata (text, likes, retweets, etc.)
+    """
+    
+    def __init__(self):
+        config = load_config()
+        twitter_config = config.get('twitter', {})
+        
+        # Twitter credentials (optional - works without login for public tweets, but limited)
+        self.username = twitter_config.get('username', '')
+        self.password = twitter_config.get('password', '')
+        
+        # Use thumbnail directory from config
+        self.thumbnail_dir = config.get('thumbnail_directory', 'thumbnails')
+        ensure_dir_exists(self.thumbnail_dir)
+        
+        self.browser = None
+        self.context = None
+        self.page = None
+        self.posts_data = []
+        
+        logger.info(f"TwitterScraper initialized (login: {'enabled' if self.username else 'disabled'})")
+    
+    async def setup_browser(self):
+        """Initialize Playwright browser with anti-detection measures."""
+        playwright = await async_playwright().start()
+        
+        logger.info("Setting up browser for Twitter scraping...")
+        
+        # Launch browser with anti-detection args
+        self.browser = await playwright.chromium.launch(
+            headless=False,
+            args=[
+                '--disable-blink-features=AutomationControlled',
+                '--disable-notifications',
+                '--start-maximized',
+                '--disable-extensions',
+                '--disable-dev-shm-usage',
+                '--no-sandbox',
+                '--window-size=1920,1080',
+                '--enable-unsafe-swiftshader'
+            ]
+        )
+        
+        # Configure context to bypass automation detection
+        self.context = await self.browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            has_touch=False,
+            locale='en-US',
+            timezone_id='America/New_York',
+            screen={'width': 1920, 'height': 1080},
+            ignore_https_errors=True
+        )
+        
+        # Remove webdriver property
+        await self.context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+        """)
+        
+        self.page = await self.context.new_page()
+        self.page.set_default_timeout(30000)
+        
+        logger.info("Browser setup complete")
+    
+    async def login(self):
+        """Login to Twitter (optional but recommended for better access)."""
+        if not self.username or not self.password:
+            logger.info("No Twitter credentials provided, continuing without login")
+            return False
+        
+        try:
+            logger.info("Attempting to login to Twitter...")
+            await self.page.goto("https://twitter.com/i/flow/login", wait_until="networkidle")
+            await asyncio.sleep(3)
+            
+            # Enter username
+            username_input = await self.page.wait_for_selector('input[autocomplete="username"]', timeout=10000)
+            await username_input.fill(self.username)
+            await asyncio.sleep(1)
+            
+            # Click next
+            next_button = await self.page.query_selector('div[role="button"]:has-text("Next")')
+            if next_button:
+                await next_button.click()
+                await asyncio.sleep(2)
+            
+            # Enter password
+            password_input = await self.page.wait_for_selector('input[name="password"]', timeout=10000)
+            await password_input.fill(self.password)
+            await asyncio.sleep(1)
+            
+            # Click login
+            login_button = await self.page.query_selector('div[role="button"]:has-text("Log in")')
+            if login_button:
+                await login_button.click()
+                await asyncio.sleep(5)
+            
+            # Verify login success
+            try:
+                await self.page.wait_for_selector('a[aria-label="Home"]', timeout=15000)
+                logger.info("Successfully logged in to Twitter")
+                return True
+            except TimeoutError:
+                logger.warning("Login verification failed - may need manual verification")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Twitter login failed: {e}")
+            return False
+    
+    async def search_tweets(self, query, limit=50):
+        """
+        Search for tweets matching a query.
+        
+        Args:
+            query: Search term or hashtag
+            limit: Maximum tweets to retrieve
+        """
+        logger.info(f"Searching Twitter for: {query} (limit: {limit})")
+        
+        try:
+            # Navigate to search
+            search_url = f"https://twitter.com/search?q={query}&src=typed_query&f=live"
+            await self.page.goto(search_url, wait_until="networkidle")
+            await asyncio.sleep(3)
+            
+            # Wait for tweets to load
+            try:
+                await self.page.wait_for_selector('article[data-testid="tweet"]', timeout=15000)
+                logger.info("Tweets loaded successfully")
+            except TimeoutError:
+                logger.warning("No tweets found or page didn't load properly")
+                return []
+            
+            # Scroll and scrape
+            posts_data = await self._scroll_and_scrape(limit)
+            self.posts_data = posts_data
+            
+            logger.info(f"Successfully scraped {len(posts_data)} tweets")
+            return posts_data
+            
+        except Exception as e:
+            logger.error(f"Error searching tweets: {e}")
+            return []
+    
+    async def _scroll_and_scrape(self, limit):
+        """Scroll through tweets and extract data."""
+        posts_data = []
+        processed_ids = set()
+        last_height = await self.page.evaluate("document.body.scrollHeight")
+        no_new_tweets_count = 0
+        
+        with tqdm(total=limit, desc="Scraping tweets") as pbar:
+            while len(posts_data) < limit:
+                # Find all tweet articles
+                tweets = await self.page.query_selector_all('article[data-testid="tweet"]')
+                
+                for tweet in tweets:
+                    if len(posts_data) >= limit:
+                        break
+                    
+                    try:
+                        tweet_data = await self._extract_tweet_data(tweet)
+                        if tweet_data and tweet_data['post_id'] not in processed_ids:
+                            processed_ids.add(tweet_data['post_id'])
+                            posts_data.append(tweet_data)
+                            
+                            # Download media thumbnail if available
+                            if tweet_data.get('image_url'):
+                                download_thumbnail(
+                                    tweet_data['image_url'],
+                                    tweet_data['post_id'],
+                                    self.thumbnail_dir
+                                )
+                            
+                            pbar.update(1)
+                            
+                    except Exception as e:
+                        logger.debug(f"Error extracting tweet: {e}")
+                        continue
+                
+                if len(posts_data) >= limit:
+                    break
+                
+                # Scroll down
+                await self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await asyncio.sleep(2)
+                
+                # Check if we've reached the bottom
+                new_height = await self.page.evaluate("document.body.scrollHeight")
+                if new_height == last_height:
+                    no_new_tweets_count += 1
+                    if no_new_tweets_count >= 3:
+                        logger.info("Reached end of tweets")
+                        break
+                else:
+                    no_new_tweets_count = 0
+                    last_height = new_height
+        
+        return posts_data
+    
+    async def _extract_tweet_data(self, tweet_element):
+        """Extract data from a single tweet element."""
+        try:
+            # Get tweet text
+            text_elem = await tweet_element.query_selector('div[data-testid="tweetText"]')
+            post_text = ""
+            if text_elem:
+                post_text = await text_elem.inner_text()
+                post_text = self._clean_text(post_text)
+            
+            # Extract hashtags
+            hashtags = re.findall(r'#(\w+)', post_text)
+            
+            # Remove hashtags from text for cleaner storage
+            clean_text = re.sub(r'#\w+\s*', '', post_text).strip()
+            clean_text = ' '.join(clean_text.split())
+            
+            # Get author/username
+            author = ""
+            author_elem = await tweet_element.query_selector('div[data-testid="User-Name"] a')
+            if author_elem:
+                href = await author_elem.get_attribute('href')
+                if href:
+                    author = href.strip('/').split('/')[-1]
+            
+            # Get tweet URL (contains tweet ID)
+            post_id = ""
+            url = ""
+            links = await tweet_element.query_selector_all('a[href*="/status/"]')
+            for link in links:
+                href = await link.get_attribute('href')
+                if href and '/status/' in href:
+                    url = f"https://twitter.com{href}" if href.startswith('/') else href
+                    # Extract tweet ID from URL
+                    match = re.search(r'/status/(\d+)', href)
+                    if match:
+                        post_id = match.group(1)
+                        break
+            
+            if not post_id:
+                # Generate fallback ID from content hash
+                import hashlib
+                post_id = hashlib.md5(post_text.encode()).hexdigest()[:16]
+            
+            # Get timestamp
+            timestamp = ""
+            time_elem = await tweet_element.query_selector('time')
+            if time_elem:
+                timestamp = await time_elem.get_attribute('datetime') or ""
+            
+            # Get engagement metrics
+            likes = await self._get_metric(tweet_element, 'like')
+            retweets = await self._get_metric(tweet_element, 'retweet')
+            replies = await self._get_metric(tweet_element, 'reply')
+            
+            # Get media/image URL
+            image_url = ""
+            img_elem = await tweet_element.query_selector('img[src*="pbs.twimg.com/media"]')
+            if img_elem:
+                image_url = await img_elem.get_attribute('src') or ""
+            
+            return {
+                'post_id': post_id,
+                'platform': 'twitter',
+                'post_text': clean_text,
+                'hashtags': ','.join(hashtags),
+                'timestamp': timestamp,
+                'image_url': image_url,
+                'likes': likes,
+                'comments': replies,
+                'author': author,
+                'retweet_count': retweets,
+                'url': url,
+                'scraped_at': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            logger.debug(f"Error extracting tweet data: {e}")
+            return None
+    
+    async def _get_metric(self, tweet_element, metric_type):
+        """Extract a specific metric (likes, retweets, replies) from tweet."""
+        try:
+            selector = f'div[data-testid="{metric_type}"] span span'
+            elem = await tweet_element.query_selector(selector)
+            if elem:
+                text = await elem.inner_text()
+                return self._parse_metric_text(text)
+        except Exception:
+            pass
+        return 0
+    
+    def _parse_metric_text(self, text):
+        """Parse metric text like '1.2K' or '3M' into integers."""
+        if not text:
+            return 0
+        
+        text = text.strip().upper()
+        
+        try:
+            if 'K' in text:
+                return int(float(text.replace('K', '')) * 1000)
+            elif 'M' in text:
+                return int(float(text.replace('M', '')) * 1000000)
+            else:
+                return int(text.replace(',', ''))
+        except (ValueError, TypeError):
+            return 0
+    
+    def _clean_text(self, text):
+        """Clean tweet text content."""
+        if not text:
+            return ""
+        
+        # Replace special characters
+        text = text.replace('\u2018', "'")
+        text = text.replace('\u2019', "'")
+        text = text.replace('\u201c', '"')
+        text = text.replace('\u201d', '"')
+        text = text.replace('\u2013', '-')
+        text = text.replace('\u2014', '--')
+        text = text.replace('\u200b', '')
+        text = text.replace('\ufeff', '')
+        
+        # Normalize whitespace
+        text = ' '.join(text.split())
+        
+        return text.strip()
+    
+    async def cleanup(self):
+        """Close the browser and clean up resources."""
+        if self.browser:
+            await self.browser.close()
+            logger.info("Browser closed")
+    
+    @classmethod
+    async def _execute_scrape(cls, query, limit):
+        """
+        Twitter-specific implementation of the scrape method.
+        
+        Args:
+            query: Search term or hashtag
+            limit: Maximum tweets to retrieve
+        """
+        scraper = cls()
+        
+        try:
+            await scraper.setup_browser()
+            
+            # Try to login if credentials are available
+            await scraper.login()
+            
+            # Search and scrape tweets
+            posts_data = await scraper.search_tweets(query, limit)
+            return posts_data
+            
+        except Exception as e:
+            logger.error(f"Twitter scraping failed: {e}")
+            raise
+        finally:
+            await scraper.cleanup()
