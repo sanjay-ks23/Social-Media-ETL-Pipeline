@@ -2,8 +2,6 @@
 
 A production-grade Python framework for extracting, transforming, and loading social media data from multiple platforms. Built for researchers, data scientists, and developers who need structured datasets for sentiment analysis, behavioral modeling, and NLP applications.
 
-![Interactive CLI Preview](assets/Screenshot from 2026-01-14 20-11-29.png)
-
 ---
 
 ## Table of Contents
@@ -23,7 +21,6 @@ A production-grade Python framework for extracting, transforming, and loading so
 - [Data Schema](#data-schema)
 - [Architecture](#architecture)
 - [Performance](#performance)
-- [Troubleshooting](#troubleshooting)
 - [License](#license)
 
 ---
@@ -513,45 +510,6 @@ Social-Media-ETL-Pipeline/
 
 ---
 
-## Troubleshooting
-
-### Common Issues
-
-**ModuleNotFoundError: No module named 'duckdb'**
-```bash
-pip install duckdb
-```
-
-**Playwright browser not found**
-```bash
-playwright install chromium
-```
-
-**No posts returned from scraper**
-- Verify credentials in `config.json`
-- Check network connectivity
-- Twitter/Instagram may require CAPTCHA verification on first login
-
-**Rate limit errors**
-- The scrapers include built-in rate limiting
-- For Reddit, requests are spaced 2 seconds apart
-- Wait a few minutes before retrying if rate limited
-
-**Database locked error**
-- Ensure only one process accesses the database at a time
-- Close any open database connections before running new queries
-
-### Logging
-
-Enable debug logging for detailed output:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
----
-
 ## Dependencies
 
 | Package | Purpose |
@@ -586,3 +544,9 @@ Contributions are welcome. Please submit pull requests with:
 ## Disclaimer
 
 This tool is intended for research and educational purposes. Users are responsible for ensuring their use complies with the terms of service of each platform and applicable laws regarding data collection and privacy.
+
+---
+
+### Dashboard Preview
+
+![Interactive CLI Preview](assets/cli_dashboard.png)
