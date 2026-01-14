@@ -376,23 +376,101 @@ All platforms output data in a consistent schema:
 
 ## Architecture
 
+### System Overview
+
+```mermaid
+flowchart TB
+    subgraph Interface["User Interface Layer"]
+        CLI["Interactive CLI<br/>(cli.py)"]
+        Script["Command Line<br/>(scrape_posts.py)"]
+        API["Python API<br/>(Direct Import)"]
+    end
+
+    subgraph ETL["ETL Pipeline"]
+        direction LR
+        Extract["EXTRACT"]
+        Transform["TRANSFORM"]
+        Load["LOAD"]
+        Extract --> Transform --> Load
+    end
+
+    subgraph Storage["Data Storage"]
+        DB[(DuckDB<br/>Database)]
+        CSV["CSV Export"]
+        Parquet["Parquet Export"]
+    end
+
+    Interface --> ETL
+    ETL --> Storage
 ```
-                                    INTERACTIVE CLI
-                                     (cli.py)
-                                         |
-                                         v
-+------------------+     +------------------+     +------------------+
-|     EXTRACT      |     |    TRANSFORM     |     |      LOAD        |
-|   (scrapers.py)  | --> |    (etl.py)      | --> |  (database.py)   |
-+------------------+     +------------------+     +------------------+
-|                  |     |                  |     |                  |
-| - RedditScraper  |     | - Text cleaning  |     | - DuckDB storage |
-| - TwitterScraper |     | - Sentiment      |     | - SQL queries    |
-| - YouTubeScraper |     | - Enrichment     |     | - Export (CSV,   |
-| - InstagramScraper|    | - Validation     |     |   Parquet)       |
-|                  |     |                  |     |                  |
-+------------------+     +------------------+     +------------------+
+
+### ETL Pipeline Detail
+
+```mermaid
+flowchart LR
+    subgraph Extract["Extract (scrapers.py)"]
+        Reddit["RedditScraper<br/>JSON Endpoints"]
+        Twitter["TwitterScraper<br/>Playwright"]
+        YouTube["YouTubeScraper<br/>Data API v3"]
+        Instagram["InstagramScraper<br/>Playwright"]
+    end
+
+    subgraph Transform["Transform (etl.py)"]
+        Clean["Text Cleaning"]
+        Sentiment["Sentiment Analysis"]
+        Enrich["Data Enrichment"]
+        Validate["Validation"]
+        Clean --> Sentiment --> Enrich --> Validate
+    end
+
+    subgraph Load["Load (database.py)"]
+        Batch["Batch Insert"]
+        Index["Index Updates"]
+        Dedup["Deduplication"]
+    end
+
+    Extract --> Transform --> Load
 ```
+
+### Data Flow
+
+```mermaid
+flowchart TD
+    A[Raw Social Media Data] --> B{Platform Router}
+    
+    B --> C1[Reddit API]
+    B --> C2[Twitter DOM]
+    B --> C3[YouTube API]
+    B --> C4[Instagram DOM]
+    
+    C1 --> D[Raw Posts]
+    C2 --> D
+    C3 --> D
+    C4 --> D
+    
+    D --> E[Text Cleaning]
+    E --> F[Sentiment Labeling]
+    F --> G[Engagement Scoring]
+    G --> H[Schema Validation]
+    
+    H --> I[(DuckDB)]
+    
+    I --> J1[SQL Queries]
+    I --> J2[Analytics]
+    I --> J3[Export]
+```
+
+### Component Responsibilities
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| Interface | `cli.py` | Interactive menu, prompts, display |
+| Interface | `scrape_posts.py` | Command-line argument parsing |
+| Extract | `scrapers.py` | Platform-specific data retrieval |
+| Transform | `etl.py` | Data cleaning, sentiment, enrichment |
+| Load | `database.py` | DuckDB operations, queries, export |
+| Utilities | `utils.py` | Rate limiting, text processing |
+
 
 ---
 
